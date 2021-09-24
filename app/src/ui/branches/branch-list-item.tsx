@@ -1,14 +1,16 @@
+import { clipboard } from 'electron'
 import * as React from 'react'
 import moment from 'moment'
 
 import { IMatches } from '../../lib/fuzzy-find'
 
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon } from '../octicons'
+import * as OcticonSymbol from '../octicons/octicons.generated'
 import { HighlightText } from '../lib/highlight-text'
 import { showContextualMenu } from '../main-process-proxy'
 import { IMenuItem } from '../../lib/menu-item'
-import { String } from 'aws-sdk/clients/apigateway'
-import classNames from 'classnames'
+import { dragAndDropManager } from '../../lib/drag-and-drop-manager'
+import { DragType, DropTargetType } from '../../models/drag-drop'
 
 interface IBranchListItemProps {
   /** The name of the branch */
@@ -30,24 +32,15 @@ interface IBranchListItemProps {
 
   readonly onDeleteBranch?: (branchName: string) => void
 
-  readonly onDropOntoBranch?: (branchName: String) => void
-}
+  /** When a drag element has landed on a branch that is not current */
+  readonly onDropOntoBranch?: (branchName: string) => void
 
-interface IBranchListItemState {
-  readonly isDraggedOver: boolean
+  /** When a drag element has landed on the current branch */
+  readonly onDropOntoCurrentBranch?: () => void
 }
 
 /** The branch component. */
-export class BranchListItem extends React.Component<
-  IBranchListItemProps,
-  IBranchListItemState
-> {
-  public constructor(props: IBranchListItemProps) {
-    super(props)
-
-    this.state = { isDraggedOver: false }
-  }
-
+export class BranchListItem extends React.Component<IBranchListItemProps, {}> {
   private onContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
 
@@ -72,6 +65,13 @@ export class BranchListItem extends React.Component<
       })
     }
 
+    items.push({
+      label: __DARWIN__ ? 'Copy Branch Name' : 'Copy branch name',
+      action: () => clipboard.writeText(name),
+    })
+
+    items.push({ type: 'separator' })
+
     if (onDeleteBranch !== undefined) {
       items.push({
         label: 'Delete…',
@@ -82,23 +82,39 @@ export class BranchListItem extends React.Component<
     showContextualMenu(items)
   }
 
-  private onDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    this.setState({ isDraggedOver: true })
+  private onMouseEnter = () => {
+    if (dragAndDropManager.isDragOfTypeInProgress(DragType.Commit)) {
+      dragAndDropManager.emitEnterDropTarget({
+        type: DropTargetType.Branch,
+        branchName: this.props.name,
+      })
+    }
   }
 
-  private onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    this.setState({ isDraggedOver: false })
+  private onMouseLeave = () => {
+    if (dragAndDropManager.isDragOfTypeInProgress(DragType.Commit)) {
+      dragAndDropManager.emitLeaveDropTarget()
+    }
   }
 
-  private onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-  }
+  private onMouseUp = () => {
+    const {
+      onDropOntoBranch,
+      onDropOntoCurrentBranch,
+      name,
+      isCurrentBranch,
+    } = this.props
 
-  private onDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    const { onDropOntoBranch, name } = this.props
+    if (!dragAndDropManager.isDragOfTypeInProgress(DragType.Commit)) {
+      return
+    }
 
-    if (onDropOntoBranch !== undefined) {
+    if (onDropOntoBranch !== undefined && !isCurrentBranch) {
       onDropOntoBranch(name)
+    }
+
+    if (onDropOntoCurrentBranch !== undefined && isCurrentBranch) {
+      onDropOntoCurrentBranch()
     }
   }
 
@@ -115,18 +131,13 @@ export class BranchListItem extends React.Component<
       ? lastCommitDate.toString()
       : ''
 
-    const className = classNames('branches-list-item', {
-      'dragged-over': this.state.isDraggedOver,
-    })
-
     return (
       <div
         onContextMenu={this.onContextMenu}
-        className={className}
-        onDragLeave={this.onDragLeave}
-        onDragEnter={this.onDragEnter}
-        onDragOver={this.onDragOver}
-        onDrop={this.onDrop}
+        className="branches-list-item"
+        onMouseEnter={this.onMouseEnter}
+        onMouseLeave={this.onMouseLeave}
+        onMouseUp={this.onMouseUp}
       >
         <Octicon className="icon" symbol={icon} />
         <div className="name" title={name}>

@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Dispatcher } from '../dispatcher'
-import { OcticonSymbol, syncClockwise } from '../octicons'
+import * as OcticonSymbol from '../octicons/octicons.generated'
+import { syncClockwise } from '../octicons'
 import { Repository } from '../../models/repository'
 import { TipState } from '../../models/tip'
 import { ToolbarDropdown, DropdownState } from './dropdown'
@@ -14,7 +15,10 @@ import { assertNever } from '../../lib/fatal-error'
 import { BranchesTab } from '../../models/branches-tab'
 import { PullRequest } from '../../models/pull-request'
 import classNames from 'classnames'
-import { CherryPickStepKind } from '../../models/cherry-pick'
+import { dragAndDropManager } from '../../lib/drag-and-drop-manager'
+import { DragType } from '../../models/drag-drop'
+import { Popover, PopoverCaretPosition } from '../lib/popover'
+import { CICheckRunList } from '../branches/ci-check-run-list'
 
 interface IBranchDropdownProps {
   readonly dispatcher: Dispatcher
@@ -52,10 +56,24 @@ interface IBranchDropdownProps {
   readonly shouldNudge: boolean
 }
 
+interface IBranchDropdownState {
+  readonly isPopoverOpen: boolean
+}
+
 /**
  * A drop down for selecting the currently checked out branch.
  */
-export class BranchDropdown extends React.Component<IBranchDropdownProps> {
+export class BranchDropdown extends React.Component<
+  IBranchDropdownProps,
+  IBranchDropdownState
+> {
+  public constructor(props: IBranchDropdownProps) {
+    super(props)
+    this.state = {
+      isPopoverOpen: false,
+    }
+  }
+
   private renderBranchFoldout = (): JSX.Element | null => {
     const repositoryState = this.props.repositoryState
     const branchesState = repositoryState.branchesState
@@ -96,7 +114,7 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
 
     const tipKind = tip.kind
 
-    let icon = OcticonSymbol.gitBranch
+    let icon: OcticonSymbol.OcticonSymbolType = OcticonSymbol.gitBranch
     let iconClassName: string | undefined = undefined
     let title: string
     let description = __DARWIN__ ? 'Current Branch' : 'Current branch'
@@ -159,42 +177,104 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
     })
 
     return (
-      <ToolbarDropdown
-        className="branch-button"
-        icon={icon}
-        iconClassName={iconClassName}
-        title={title}
-        description={description}
-        tooltip={tooltip}
-        onDropdownStateChanged={this.onDropDownStateChanged}
-        dropdownContentRenderer={this.renderBranchFoldout}
-        dropdownState={currentState}
-        disabled={disabled}
-        showDisclosureArrow={canOpen}
-        progressValue={progressValue}
-        buttonClassName={buttonClassName}
-        onDragOver={this.onDragOver}
-      >
-        {this.renderPullRequestInfo()}
-      </ToolbarDropdown>
+      <>
+        <ToolbarDropdown
+          className="branch-button"
+          icon={icon}
+          iconClassName={iconClassName}
+          title={title}
+          description={description}
+          tooltip={tooltip}
+          onDropdownStateChanged={this.onDropDownStateChanged}
+          dropdownContentRenderer={this.renderBranchFoldout}
+          dropdownState={currentState}
+          disabled={disabled}
+          showDisclosureArrow={canOpen}
+          progressValue={progressValue}
+          buttonClassName={buttonClassName}
+          onMouseEnter={this.onMouseEnter}
+        >
+          {this.renderPullRequestInfo()}
+        </ToolbarDropdown>
+        {this.state.isPopoverOpen && this.renderPopover()}
+      </>
     )
   }
 
   /**
-   * Method to capture when something is dragged over the branch dropdown.
+   * Method to capture when the mouse is over the branch dropdown button.
+   *
+   * We currently only use this in conjunction with dragging cherry picks so
+   * that we can open the branch menu when dragging a commit over it.
    */
-  private onDragOver = (event: React.DragEvent<HTMLDivElement>): void => {
-    event.preventDefault()
-
-    // If the cherry picking state is initiated, we assume the user is
-    // dragging commits. Therefore, we should open the branch menu.
-    const { cherryPickState } = this.props.repositoryState
-    if (
-      cherryPickState.step !== null &&
-      cherryPickState.step.kind === CherryPickStepKind.CommitsChosen
-    ) {
+  private onMouseEnter = (): void => {
+    if (dragAndDropManager.isDragOfTypeInProgress(DragType.Commit)) {
+      dragAndDropManager.emitEnterDragZone('branch-button')
       this.props.dispatcher.showFoldout({ type: FoldoutType.Branch })
     }
+  }
+
+  private onBadgeClick = () => {
+    if (this.state.isPopoverOpen) {
+      this.closePopover()
+    } else {
+      this.props.dispatcher.closeFoldout(FoldoutType.Branch)
+      this.openPopover()
+    }
+  }
+
+  private openPopover = () => {
+    this.setState(prevState => {
+      if (!prevState.isPopoverOpen) {
+        return { isPopoverOpen: true }
+      }
+      return null
+    })
+  }
+
+  private closePopover = (event?: MouseEvent) => {
+    if (event === undefined) {
+      this.setState({ isPopoverOpen: false })
+      return
+    }
+
+    const { target } = event
+    const prBadgeElem = document.getElementById('pr-badge')
+    if (
+      prBadgeElem !== null &&
+      target !== null &&
+      target instanceof Node &&
+      prBadgeElem.contains(target)
+    ) {
+      return
+    }
+
+    this.setState({ isPopoverOpen: false })
+  }
+
+  private renderPopover() {
+    const pr = this.props.currentPullRequest
+
+    if (pr === null) {
+      return null
+    }
+
+    return (
+      <div className="ci-check-list-popover">
+        <Popover
+          caretPosition={PopoverCaretPosition.Top}
+          onClickOutside={this.closePopover}
+        >
+          <div>
+            <CICheckRunList
+              prNumber={pr.pullRequestNumber}
+              dispatcher={this.props.dispatcher}
+              repository={pr.base.gitHubRepository}
+            />
+          </div>
+        </Popover>
+      </div>
+    )
   }
 
   private renderPullRequestInfo() {
@@ -209,6 +289,7 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
         number={pr.pullRequestNumber}
         dispatcher={this.props.dispatcher}
         repository={pr.base.gitHubRepository}
+        onBadgeClick={this.onBadgeClick}
       />
     )
   }

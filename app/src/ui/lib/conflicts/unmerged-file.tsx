@@ -5,12 +5,14 @@ import {
   ConflictedFileStatus,
   ConflictsWithMarkers,
   ManualConflict,
+  GitStatusEntry,
 } from '../../../models/status'
 import { join } from 'path'
 import { Repository } from '../../../models/repository'
 import { Dispatcher } from '../../dispatcher'
 import { showContextualMenu } from '../../main-process-proxy'
-import { Octicon, OcticonSymbol } from '../../octicons'
+import { Octicon } from '../../octicons'
+import * as OcticonSymbol from '../../octicons/octicons.generated'
 import { PathText } from '../path-text'
 import { ManualConflictResolution } from '../../../models/manual-conflict-resolution'
 import {
@@ -162,12 +164,28 @@ const renderManualConflictedFile: React.FunctionComponent<{
     props.ourBranch,
     props.theirBranch
   )
+  const { ourBranch, theirBranch } = props
+  const { entry } = props.status
+
+  let conflictTypeString = manualConflictString
+
+  if ([entry.us, entry.them].includes(GitStatusEntry.Deleted)) {
+    let targetBranch = 'target branch'
+    if (entry.us === GitStatusEntry.Deleted && ourBranch !== undefined) {
+      targetBranch = ourBranch
+    }
+
+    if (entry.them === GitStatusEntry.Deleted && theirBranch !== undefined) {
+      targetBranch = theirBranch
+    }
+    conflictTypeString = `File does not exist on ${targetBranch}.`
+  }
 
   const content = (
     <>
       <div className="column-left">
         <PathText path={props.path} />
-        <div className="file-conflicts-status">{manualConflictString}</div>
+        <div className="file-conflicts-status">{conflictTypeString}</div>
       </div>
       <div className="action-buttons">
         <Button

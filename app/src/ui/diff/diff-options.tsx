@@ -1,15 +1,20 @@
 import * as React from 'react'
 import { Checkbox, CheckboxValue } from '../lib/checkbox'
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon } from '../octicons'
+import * as OcticonSymbol from '../octicons/octicons.generated'
 import { RadioButton } from '../lib/radio-button'
 import { getBoolean, setBoolean } from '../../lib/local-storage'
 import { Popover, PopoverCaretPosition } from '../lib/popover'
+import { enableHideWhitespaceInDiffOption } from '../../lib/feature-flag'
+import { RepositorySectionTab } from '../../lib/app-state'
+import { HideWhitespaceWarning } from './hide-whitespace-warning'
 
 interface IDiffOptionsProps {
-  readonly hideWhitespaceChanges?: boolean
-  readonly onHideWhitespaceChangesChanged?: (
+  readonly sourceTab: RepositorySectionTab
+  readonly hideWhitespaceChanges: boolean
+  readonly onHideWhitespaceChangesChanged: (
     hideWhitespaceChanges: boolean
-  ) => void
+  ) => Promise<void>
 
   readonly showSideBySideDiff: boolean
   readonly onShowSideBySideDiffChanged: (showSideBySideDiff: boolean) => void
@@ -74,9 +79,9 @@ export class DiffOptions extends React.Component<
   private onHideWhitespaceChangesChanged = (
     event: React.FormEvent<HTMLInputElement>
   ) => {
-    if (this.props.onHideWhitespaceChangesChanged !== undefined) {
-      this.props.onHideWhitespaceChangesChanged(event.currentTarget.checked)
-    }
+    return this.props.onHideWhitespaceChangesChanged(
+      event.currentTarget.checked
+    )
   }
 
   public render() {
@@ -139,9 +144,13 @@ export class DiffOptions extends React.Component<
   }
 
   private renderHideWhitespaceChanges() {
-    if (this.props.hideWhitespaceChanges === undefined) {
-      return null
+    if (
+      this.props.sourceTab === RepositorySectionTab.Changes &&
+      !enableHideWhitespaceInDiffOption()
+    ) {
+      return
     }
+
     return (
       <section>
         <h3>Whitespace</h3>
@@ -156,6 +165,9 @@ export class DiffOptions extends React.Component<
             __DARWIN__ ? 'Hide Whitespace Changes' : 'Hide whitespace changes'
           }
         />
+        {this.props.sourceTab === RepositorySectionTab.Changes && (
+          <p className="secondary-text">{HideWhitespaceWarning}</p>
+        )}
       </section>
     )
   }

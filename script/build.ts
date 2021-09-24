@@ -4,6 +4,7 @@
 import * as path from 'path'
 import * as cp from 'child_process'
 import * as fs from 'fs-extra'
+import * as os from 'os'
 import packager, {
   OfficialArch,
   OsxNotarizeOptions,
@@ -39,6 +40,7 @@ import {
   getExecutableName,
   isPublishable,
   getIconFileName,
+  getDistArchitecture,
 } from './dist-info'
 import { isCircleCI, isGitHubActions } from './build-platforms'
 
@@ -141,7 +143,7 @@ function packageApp() {
 
   const toPackageArch = (targetArch: string | undefined): OfficialArch => {
     if (targetArch === undefined) {
-      return 'x64'
+      targetArch = os.arch()
     }
 
     if (targetArch === 'arm64' || targetArch === 'x64') {
@@ -149,7 +151,7 @@ function packageApp() {
     }
 
     throw new Error(
-      `Building Desktop for architecture '${targetArch}'  is not supported`
+      `Building Desktop for architecture '${targetArch}' is not supported`
     )
   }
 
@@ -343,6 +345,20 @@ function copyDependencies() {
     path.resolve(desktopTrampolineDir, desktopTrampolineFile)
   )
 
+  // Dev builds for macOS require a SSH wrapper to use SSH_ASKPASS
+  if (process.platform === 'darwin' && isDevelopmentBuild) {
+    console.log('  Copying ssh-wrapper')
+    const sshWrapperFile = 'ssh-wrapper'
+    fs.copySync(
+      path.resolve(
+        projectRoot,
+        'app/node_modules/desktop-trampoline/build/Release',
+        sshWrapperFile
+      ),
+      path.resolve(desktopTrampolineDir, sshWrapperFile)
+    )
+  }
+
   console.log('  Copying git environment…')
   const gitDir = path.resolve(outRoot, 'git')
   fs.removeSync(gitDir)
@@ -361,9 +377,11 @@ function copyDependencies() {
       'Microsoft.Vsts.Authentication.dll',
       'git-askpass.exe',
       'git-credential-manager.exe',
+      'WebView2Loader.dll',
     ]
 
-    const gitCoreDir = path.join(gitDir, 'mingw64', 'libexec', 'git-core')
+    const mingwFolder = getDistArchitecture() === 'x64' ? 'mingw64' : 'mingw32'
+    const gitCoreDir = path.join(gitDir, mingwFolder, 'libexec', 'git-core')
 
     for (const file of files) {
       const filePath = path.join(gitCoreDir, file)

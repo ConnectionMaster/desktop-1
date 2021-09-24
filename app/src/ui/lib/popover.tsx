@@ -15,12 +15,14 @@ import { Options as FocusTrapOptions } from 'focus-trap'
  * position.
  **/
 export enum PopoverCaretPosition {
+  Top = 'top',
   TopRight = 'top-right',
+  TopLeft = 'top-left',
   LeftTop = 'left-top',
   LeftBottom = 'left-bottom',
 }
 interface IPopoverProps {
-  readonly onClickOutside?: () => void
+  readonly onClickOutside?: (event?: MouseEvent) => void
   readonly caretPosition: PopoverCaretPosition
 }
 
@@ -57,7 +59,7 @@ export class Popover extends React.Component<IPopoverProps> {
       !ref.parentElement.contains(target) &&
       this.props.onClickOutside !== undefined
     ) {
-      this.props.onClickOutside()
+      this.props.onClickOutside(event)
     }
   }
 

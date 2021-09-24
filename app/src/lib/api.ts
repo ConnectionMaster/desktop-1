@@ -13,8 +13,16 @@ import { AuthenticationMode } from './2fa'
 import { uuid } from './uuid'
 import username from 'username'
 import { GitProtocol } from './remote-parsing'
+import { Emitter } from 'event-kit'
 
 const envEndpoint = process.env['DESKTOP_GITHUB_DOTCOM_API_ENDPOINT']
+const envHTMLURL = process.env['DESKTOP_GITHUB_DOTCOM_HTML_URL']
+const envAdditionalCookies =
+  process.env['DESKTOP_GITHUB_DOTCOM_ADDITIONAL_COOKIES']
+
+if (envAdditionalCookies !== undefined) {
+  document.cookie += '; ' + envAdditionalCookies
+}
 
 /**
  * Optional set of configurable settings for the fetchAll method
@@ -284,18 +292,23 @@ export interface IAPIIssue {
 export type APIRefState = 'failure' | 'pending' | 'success' | 'error'
 
 /** The overall status of a check run */
-export type APICheckStatus = 'queued' | 'in_progress' | 'completed'
+export enum APICheckStatus {
+  Queued = 'queued',
+  InProgress = 'in_progress',
+  Completed = 'completed',
+}
 
 /** The conclusion of a completed check run */
-export type APICheckConclusion =
-  | 'action_required'
-  | 'cancelled'
-  | 'timed_out'
-  | 'failure'
-  | 'neutral'
-  | 'success'
-  | 'skipped'
-  | 'stale'
+export enum APICheckConclusion {
+  ActionRequired = 'action_required',
+  Canceled = 'cancelled',
+  TimedOut = 'timed_out',
+  Failure = 'failure',
+  Neutral = 'neutral',
+  Success = 'success',
+  Skipped = 'skipped',
+  Stale = 'stale',
+}
 
 /**
  * The API response for a combined view of a commit
@@ -324,6 +337,14 @@ export interface IAPIRefCheckRun {
   readonly name: string
   readonly output: IAPIRefCheckRunOutput
   readonly check_suite: IAPIRefCheckRunCheckSuite
+  readonly app: IAPIRefCheckRunApp
+  readonly completed_at: string
+  readonly started_at: string
+}
+
+// NB. Only partially mapped
+export interface IAPIRefCheckRunApp {
+  readonly name: string
 }
 
 // NB. Only partially mapped
@@ -569,6 +590,18 @@ function toGitHubIsoDateString(date: Date) {
  * An object for making authenticated requests to the GitHub API
  */
 export class API {
+  private static readonly TOKEN_INVALIDATED_EVENT = 'token-invalidated'
+
+  private static readonly emitter = new Emitter()
+
+  public static onTokenInvalidated(callback: (endpoint: string) => void) {
+    API.emitter.on(API.TOKEN_INVALIDATED_EVENT, callback)
+  }
+
+  private static emitTokenInvalidated(endpoint: string) {
+    API.emitter.emit(API.TOKEN_INVALIDATED_EVENT, endpoint)
+  }
+
   /** Create a new API client from the given account. */
   public static fromAccount(account: Account): API {
     return new API(account.endpoint, account.token)
@@ -626,7 +659,11 @@ export class API {
     name: string,
     protocol: GitProtocol | undefined
   ): Promise<IAPIRepositoryCloneInfo | null> {
-    const response = await this.request('GET', `repos/${owner}/${name}`)
+    const response = await this.request('GET', `repos/${owner}/${name}`, {
+      // Make sure we don't run into cache issues when fetching the repositories,
+      // specially after repositories have been renamed.
+      reloadCache: true,
+    })
 
     if (response.status === HttpStatusCode.NotFound) {
       return null
@@ -705,9 +742,11 @@ export class API {
     try {
       const apiPath = org ? `orgs/${org.login}/repos` : 'user/repos'
       const response = await this.request('POST', apiPath, {
-        name,
-        description,
-        private: private_,
+        body: {
+          name,
+          description,
+          private: private_,
+        },
       })
 
       return await parsedResponse<IAPIFullRepository>(response)
@@ -908,7 +947,7 @@ export class API {
       Accept: 'application/vnd.github.antiope-preview+json',
     }
 
-    const response = await this.request('GET', path, undefined, headers)
+    const response = await this.request('GET', path, { customHeaders: headers })
 
     try {
       return await parsedResponse<IAPIRefCheckRuns>(response)
@@ -940,7 +979,9 @@ export class API {
     }
 
     try {
-      const response = await this.request('GET', path, undefined, headers)
+      const response = await this.request('GET', path, {
+        customHeaders: headers,
+      })
       return await parsedResponse<IAPIPushControl>(response)
     } catch (err) {
       log.info(
@@ -1011,13 +1052,39 @@ export class API {
   }
 
   /** Make an authenticated request to the client's endpoint with its token. */
-  private request(
+  private async request(
     method: HTTPMethod,
     path: string,
-    body?: Object,
-    customHeaders?: Object
+    options: {
+      body?: Object
+      customHeaders?: Object
+      reloadCache?: boolean
+    } = {}
   ): Promise<Response> {
-    return request(this.endpoint, this.token, method, path, body, customHeaders)
+    const response = await request(
+      this.endpoint,
+      this.token,
+      method,
+      path,
+      options.body,
+      options.customHeaders,
+      options.reloadCache
+    )
+
+    // Only consider invalid token when the status is 401 and the response has
+    // the X-GitHub-Request-Id header, meaning it comes from GH(E) and not from
+    // any kind of proxy/gateway. For more info see #12943
+    // We're also not considering a token has been invalidated when the reason
+    // behind a 401 is the fact that any kind of 2 factor auth is required.
+    if (
+      response.status === 401 &&
+      response.headers.has('X-GitHub-Request-Id') &&
+      !response.headers.has('X-GitHub-OTP')
+    ) {
+      API.emitTokenInvalidated(this.endpoint)
+    }
+
+    return response
   }
 
   /**
@@ -1060,7 +1127,9 @@ export class API {
 
     try {
       const path = `repos/${owner}/${name}/mentionables/users`
-      const response = await this.request('GET', path, undefined, headers)
+      const response = await this.request('GET', path, {
+        customHeaders: headers,
+      })
 
       if (response.status === HttpStatusCode.NotFound) {
         log.warn(`fetchMentionables: '${path}' returned a 404`)
@@ -1325,6 +1394,10 @@ export function getEndpointForRepository(url: string): string {
  * http://github.mycompany.com/api -> http://github.mycompany.com/
  */
 export function getHTMLURL(endpoint: string): string {
+  if (envHTMLURL !== undefined) {
+    return envHTMLURL
+  }
+
   // In the case of GitHub.com, the HTML site lives on the parent domain.
   //  E.g., https://api.github.com -> https://github.com
   //

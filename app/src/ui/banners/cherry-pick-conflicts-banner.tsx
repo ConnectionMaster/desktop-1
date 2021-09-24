@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon } from '../octicons'
+import * as OcticonSymbol from '../octicons/octicons.generated'
 import { Banner } from './banner'
 import { LinkButton } from '../lib/link-button'
 
@@ -37,7 +38,7 @@ export class CherryPickConflictsBanner extends React.Component<
         <Octicon className="alert-icon" symbol={OcticonSymbol.alert} />
         <div className="banner-message">
           <span>
-            Resolve conflicts to continue cherry picking onto{' '}
+            Resolve conflicts to continue cherry-picking onto{' '}
             <strong>{this.props.targetBranchName}</strong>.
           </span>
           <LinkButton onClick={this.openDialog}>View conflicts</LinkButton>

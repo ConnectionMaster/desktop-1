@@ -1,7 +1,7 @@
 import { Repository } from './repository'
 import { CloneOptions } from './clone-options'
 import { Branch } from './branch'
-import { CommitOneLine } from './commit'
+import { Commit, CommitOneLine, ICommitContext } from './commit'
 
 /** The types of actions that can be retried. */
 export enum RetryActionType {
@@ -13,6 +13,9 @@ export enum RetryActionType {
   Merge,
   Rebase,
   CherryPick,
+  CreateBranchForCherryPick,
+  Squash,
+  Reorder,
 }
 
 /** The retriable actions and their associated data. */
@@ -36,7 +39,7 @@ export type RetryAction =
       type: RetryActionType.Merge
       repository: Repository
       currentBranch: string
-      theirBranch: string
+      theirBranch: Branch
     }
   | {
       type: RetryActionType.Rebase
@@ -50,4 +53,28 @@ export type RetryAction =
       targetBranch: Branch
       commits: ReadonlyArray<CommitOneLine>
       sourceBranch: Branch | null
+    }
+  | {
+      type: RetryActionType.CreateBranchForCherryPick
+      repository: Repository
+      targetBranchName: string
+      startPoint: string | null
+      noTrackOption: boolean
+      commits: ReadonlyArray<CommitOneLine>
+      sourceBranch: Branch | null
+    }
+  | {
+      type: RetryActionType.Squash
+      repository: Repository
+      toSquash: ReadonlyArray<Commit>
+      squashOnto: Commit
+      lastRetainedCommitRef: string | null
+      commitContext: ICommitContext
+    }
+  | {
+      type: RetryActionType.Reorder
+      repository: Repository
+      commitsToReorder: ReadonlyArray<Commit>
+      beforeCommit: Commit | null
+      lastRetainedCommitRef: string | null
     }

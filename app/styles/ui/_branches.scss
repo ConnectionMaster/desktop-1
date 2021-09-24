@@ -17,15 +17,11 @@
 
   .branches-list-item {
     height: 100%;
-    &.dragged-over {
-      --text-color: var(--box-selected-active-text-color);
-      --text-secondary-color: var(--box-selected-active-text-color);
 
-      color: var(--text-color);
-      background-color: var(--box-selected-active-background-color);
-    }
-    div {
-      pointer-events: none;
+    &.new-branch-drop {
+      margin-top: var(--spacing-half);
+      height: 30px;
+      flex-grow: revert;
     }
   }
 }
@@ -87,6 +83,11 @@
     align-items: center;
     min-width: 0;
     flex-grow: 1;
+    height: 100%;
+
+    div {
+      pointer-events: none;
+    }
 
     .icon {
       margin-left: var(--spacing-half);
