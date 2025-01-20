@@ -28,6 +28,9 @@ interface ILinkButtonProps {
 
   /** title-text or tooltip for the link */
   readonly title?: string
+
+  /** aria-label for the link */
+  readonly ariaLabel?: string
 }
 
 /**
@@ -44,6 +47,7 @@ export class LinkButton extends React.Component<ILinkButtonProps, {}> {
     const { title } = this.props
 
     return (
+      // eslint-disable-next-line jsx-a11y/mouse-events-have-key-events
       <a
         ref={this.anchorRef}
         className={className}
@@ -52,6 +56,7 @@ export class LinkButton extends React.Component<ILinkButtonProps, {}> {
         onMouseOut={this.props.onMouseOut}
         onClick={this.onClick}
         tabIndex={this.props.tabIndex}
+        aria-label={this.props.ariaLabel}
       >
         {title && <Tooltip target={this.anchorRef}>{title}</Tooltip>}
         {this.props.children}

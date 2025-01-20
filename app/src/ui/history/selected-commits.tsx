@@ -25,7 +25,6 @@ import { Dispatcher } from '../dispatcher'
 import { Resizable } from '../resizable'
 import { showContextualMenu } from '../../lib/menu-item'
 
-import { CommitSummary } from './commit-summary'
 import { FileList } from './file-list'
 import { SeamlessDiffSwitcher } from '../diff/seamless-diff-switcher'
 import { getDotComAPIEndpoint } from '../../lib/api'
@@ -34,15 +33,16 @@ import { IChangesetData } from '../../lib/git'
 import { IConstrainedValue } from '../../lib/app-state'
 import { clamp } from '../../lib/clamp'
 import { pathExists } from '../lib/path-exists'
-import { enableMultiCommitDiffs } from '../../lib/feature-flag'
-import { PopupType } from '../../models/popup'
 import { UnreachableCommitsTab } from './unreachable-commits-dialog'
+import { ExpandableCommitSummary } from './expandable-commit-summary'
+import { DiffHeader } from '../diff/diff-header'
+import { Account } from '../../models/account'
+import { Emoji } from '../../lib/emoji'
 
 interface ISelectedCommitsProps {
   readonly repository: Repository
-  readonly isLocalRepository: boolean
   readonly dispatcher: Dispatcher
-  readonly emoji: Map<string, string>
+  readonly emoji: Map<string, Emoji>
   readonly selectedCommits: ReadonlyArray<Commit>
   readonly shasInDiff: ReadonlyArray<string>
   readonly localCommitSHAs: ReadonlyArray<string>
@@ -72,6 +72,9 @@ interface ISelectedCommitsProps {
    */
   readonly onOpenBinaryFile: (fullPath: string) => void
 
+  /** Called when the user requests to open a submodule. */
+  readonly onOpenSubmodule: (fullPath: string) => void
+
   /**
    * Called when the user is viewing an image diff and requests
    * to change the diff presentation mode.
@@ -86,11 +89,12 @@ interface ISelectedCommitsProps {
 
   /** Whether or not the selection of commits is contiguous */
   readonly isContiguous: boolean
+
+  readonly accounts: ReadonlyArray<Account>
 }
 
 interface ISelectedCommitsState {
   readonly isExpanded: boolean
-  readonly hideDescriptionBorder: boolean
 }
 
 /** The History component. Contains the commit list, commit summary, and diff. */
@@ -99,14 +103,12 @@ export class SelectedCommits extends React.Component<
   ISelectedCommitsState
 > {
   private readonly loadChangedFilesScheduler = new ThrottledScheduler(200)
-  private historyRef: HTMLDivElement | null = null
 
   public constructor(props: ISelectedCommitsProps) {
     super(props)
 
     this.state = {
       isExpanded: false,
-      hideDescriptionBorder: false,
     }
   }
 
@@ -114,8 +116,11 @@ export class SelectedCommits extends React.Component<
     this.props.dispatcher.changeFileSelection(this.props.repository, file)
   }
 
-  private onHistoryRef = (ref: HTMLDivElement | null) => {
-    this.historyRef = ref
+  private onRowDoubleClick = (row: number) => {
+    const files = this.props.changesetData.files
+    const file = files[row]
+
+    this.props.onOpenInExternalEditor(file.path)
   }
 
   public componentWillUpdate(nextProps: ISelectedCommitsProps) {
@@ -151,24 +156,51 @@ export class SelectedCommits extends React.Component<
     }
 
     return (
-      <SeamlessDiffSwitcher
-        repository={this.props.repository}
-        imageDiffType={this.props.selectedDiffType}
-        file={file}
-        diff={diff}
-        readOnly={true}
-        hideWhitespaceInDiff={this.props.hideWhitespaceInDiff}
+      <div className="diff-container">
+        {this.renderDiffHeader()}
+        <SeamlessDiffSwitcher
+          repository={this.props.repository}
+          imageDiffType={this.props.selectedDiffType}
+          file={file}
+          diff={diff}
+          readOnly={true}
+          hideWhitespaceInDiff={this.props.hideWhitespaceInDiff}
+          showDiffCheckMarks={false}
+          showSideBySideDiff={this.props.showSideBySideDiff}
+          onOpenBinaryFile={this.props.onOpenBinaryFile}
+          onChangeImageDiffType={this.props.onChangeImageDiffType}
+          onHideWhitespaceInDiffChanged={this.onHideWhitespaceInDiffChanged}
+          onOpenSubmodule={this.props.onOpenSubmodule}
+        />
+      </div>
+    )
+  }
+
+  private renderDiffHeader() {
+    const { selectedFile } = this.props
+    if (selectedFile === null) {
+      return null
+    }
+
+    const { path, status } = selectedFile
+
+    return (
+      <DiffHeader
+        diff={this.props.currentDiff}
+        path={path}
+        status={status}
         showSideBySideDiff={this.props.showSideBySideDiff}
-        onOpenBinaryFile={this.props.onOpenBinaryFile}
-        onChangeImageDiffType={this.props.onChangeImageDiffType}
+        onShowSideBySideDiffChanged={this.onShowSideBySideDiffChanged}
+        hideWhitespaceInDiff={this.props.hideWhitespaceInDiff}
         onHideWhitespaceInDiffChanged={this.onHideWhitespaceInDiffChanged}
+        onDiffOptionsOpened={this.props.onDiffOptionsOpened}
       />
     )
   }
 
   private renderCommitSummary(commits: ReadonlyArray<Commit>) {
     return (
-      <CommitSummary
+      <ExpandableCommitSummary
         selectedCommits={commits}
         shasInDiff={this.props.shasInDiff}
         changesetData={this.props.changesetData}
@@ -176,24 +208,15 @@ export class SelectedCommits extends React.Component<
         repository={this.props.repository}
         onExpandChanged={this.onExpandChanged}
         isExpanded={this.state.isExpanded}
-        onDescriptionBottomChanged={this.onDescriptionBottomChanged}
-        hideDescriptionBorder={this.state.hideDescriptionBorder}
-        hideWhitespaceInDiff={this.props.hideWhitespaceInDiff}
-        showSideBySideDiff={this.props.showSideBySideDiff}
-        onHideWhitespaceInDiffChanged={this.onHideWhitespaceInDiffChanged}
-        onShowSideBySideDiffChanged={this.onShowSideBySideDiffChanged}
-        onDiffOptionsOpened={this.props.onDiffOptionsOpened}
         onHighlightShas={this.onHighlightShas}
         showUnreachableCommits={this.showUnreachableCommits}
+        accounts={this.props.accounts}
       />
     )
   }
 
   private showUnreachableCommits = (selectedTab: UnreachableCommitsTab) => {
-    this.props.dispatcher.showPopup({
-      type: PopupType.UnreachableCommits,
-      selectedTab,
-    })
+    this.props.dispatcher.showUnreachableCommits(selectedTab)
   }
 
   private onHighlightShas = (shasToHighlight: ReadonlyArray<string>) => {
@@ -205,15 +228,6 @@ export class SelectedCommits extends React.Component<
 
   private onExpandChanged = (isExpanded: boolean) => {
     this.setState({ isExpanded })
-  }
-
-  private onDescriptionBottomChanged = (descriptionBottom: Number) => {
-    if (this.historyRef) {
-      const historyBottom = this.historyRef.getBoundingClientRect().bottom
-      this.setState({
-        hideDescriptionBorder: descriptionBottom >= historyBottom,
-      })
-    }
   }
 
   private onHideWhitespaceInDiffChanged = (hideWhitespaceInDiff: boolean) => {
@@ -246,13 +260,27 @@ export class SelectedCommits extends React.Component<
     const availableWidth = clamp(this.props.commitSummaryWidth) - 1
 
     return (
-      <FileList
-        files={files}
-        onSelectedFileChanged={this.onFileSelected}
-        selectedFile={this.props.selectedFile}
-        availableWidth={availableWidth}
-        onContextMenu={this.onContextMenu}
-      />
+      <>
+        {this.renderFileHeader()}
+        <FileList
+          files={files}
+          onSelectedFileChanged={this.onFileSelected}
+          selectedFile={this.props.selectedFile}
+          availableWidth={availableWidth}
+          onContextMenu={this.onContextMenu}
+          onRowDoubleClick={this.onRowDoubleClick}
+        />
+      </>
+    )
+  }
+
+  private renderFileHeader() {
+    const fileCount = this.props.changesetData.files.length
+    const filesPlural = fileCount === 1 ? 'file' : 'files'
+    return (
+      <div className="file-list-header">
+        {fileCount} changed {filesPlural}
+      </div>
     )
   }
 
@@ -269,10 +297,7 @@ export class SelectedCommits extends React.Component<
   public render() {
     const { selectedCommits, isContiguous } = this.props
 
-    if (
-      selectedCommits.length > 1 &&
-      (!isContiguous || !enableMultiCommitDiffs())
-    ) {
+    if (selectedCommits.length > 1 && !isContiguous) {
       return this.renderMultipleCommitsBlankSlate()
     }
 
@@ -284,7 +309,7 @@ export class SelectedCommits extends React.Component<
     const { commitSummaryWidth } = this.props
 
     return (
-      <div id="history" ref={this.onHistoryRef} className={className}>
+      <div id="history" className={className}>
         {this.renderCommitSummary(selectedCommits)}
         <div className="commit-details">
           <Resizable
@@ -293,6 +318,7 @@ export class SelectedCommits extends React.Component<
             maximumWidth={commitSummaryWidth.max}
             onResize={this.onCommitSummaryResize}
             onReset={this.onCommitSummaryReset}
+            description="Selected commit file list"
           >
             {this.renderFileList()}
           </Resizable>
@@ -320,21 +346,16 @@ export class SelectedCommits extends React.Component<
     return (
       <div id="multiple-commits-selected" className="blankslate">
         <div className="panel blankslate">
-          <img src={BlankSlateImage} className="blankslate-image" />
+          <img src={BlankSlateImage} className="blankslate-image" alt="" />
           <div>
             <p>
-              Unable to display diff when multiple{' '}
-              {enableMultiCommitDiffs() ? 'non-consecutive ' : ' '}commits are
-              selected.
+              Unable to display diff when multiple non-consecutive selected.
             </p>
             <div>You can:</div>
             <ul>
               <li>
-                Select a single commit{' '}
-                {enableMultiCommitDiffs()
-                  ? 'or a range of consecutive commits '
-                  : ' '}
-                to view a diff.
+                Select a single commit or a range of consecutive commits to view
+                a diff.
               </li>
               <li>Drag the commits to the branch menu to cherry-pick them.</li>
               <li>Drag the commits to squash or reorder them.</li>
@@ -389,7 +410,7 @@ export class SelectedCommits extends React.Component<
       },
       {
         label: openInExternalEditor,
-        action: () => this.props.onOpenInExternalEditor(fullPath),
+        action: () => this.props.onOpenInExternalEditor(file.path),
         enabled: fileExistsOnDisk,
       },
       {
@@ -445,7 +466,7 @@ function NoCommitSelected() {
 
   return (
     <div className="panel blankslate">
-      <img src={BlankSlateImage} className="blankslate-image" />
+      <img src={BlankSlateImage} className="blankslate-image" alt="" />
       No commit selected
     </div>
   )

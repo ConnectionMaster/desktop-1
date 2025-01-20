@@ -10,6 +10,7 @@ import { TipState } from '../models/tip'
 import { updateMenuState as ipcUpdateMenuState } from '../ui/main-process-proxy'
 import { AppMenu, MenuItem } from '../models/app-menu'
 import { hasConflictedFiles } from './status'
+import { findContributionTargetDefaultBranch } from './branch'
 
 export interface IMenuItemState {
   readonly enabled?: boolean
@@ -134,6 +135,7 @@ const allMenuIds: ReadonlyArray<MenuIDs> = [
   'clone-repository',
   'about',
   'create-pull-request',
+  'preview-pull-request',
   'squash-and-merge-branch',
 ]
 
@@ -159,13 +161,14 @@ function getRepositoryMenuBuilder(state: IAppState): MenuStateBuilder {
   let onDetachedHead = false
   let hasChangedFiles = false
   let hasConflicts = false
-  let hasDefaultBranch = false
   let hasPublishedBranch = false
   let networkActionInProgress = false
   let tipStateIsUnknown = false
   let branchIsUnborn = false
   let rebaseInProgress = false
   let branchHasStashEntry = false
+  let onContributionTargetDefaultBranch = false
+  let hasContributionTargetDefaultBranch = false
 
   // check that its a github repo and if so, that is has issues enabled
   const repoIssuesEnabled =
@@ -180,12 +183,18 @@ function getRepositoryMenuBuilder(state: IAppState): MenuStateBuilder {
     const tip = branchesState.tip
     const defaultBranch = branchesState.defaultBranch
 
-    hasDefaultBranch = Boolean(defaultBranch)
-
     onBranch = tip.kind === TipState.Valid
     onDetachedHead = tip.kind === TipState.Detached
     tipStateIsUnknown = tip.kind === TipState.Unknown
     branchIsUnborn = tip.kind === TipState.Unborn
+    const contributionTarget = findContributionTargetDefaultBranch(
+      selectedState.repository,
+      branchesState
+    )
+    hasContributionTargetDefaultBranch = contributionTarget !== null
+    onContributionTargetDefaultBranch =
+      tip.kind === TipState.Valid &&
+      contributionTarget?.name === tip.branch.name
 
     // If we are:
     //  1. on the default branch, or
@@ -257,7 +266,9 @@ function getRepositoryMenuBuilder(state: IAppState): MenuStateBuilder {
     )
     menuStateBuilder.setEnabled(
       'update-branch-with-contribution-target-branch',
-      onNonDefaultBranch && hasDefaultBranch && !onDetachedHead
+      onBranch &&
+        hasContributionTargetDefaultBranch &&
+        !onContributionTargetDefaultBranch
     )
     menuStateBuilder.setEnabled('merge-branch', onBranch)
     menuStateBuilder.setEnabled('squash-and-merge-branch', onBranch)
@@ -281,6 +292,11 @@ function getRepositoryMenuBuilder(state: IAppState): MenuStateBuilder {
       'create-pull-request',
       isHostedOnGitHub && !branchIsUnborn && !onDetachedHead
     )
+    menuStateBuilder.setEnabled(
+      'preview-pull-request',
+      !branchIsUnborn && !onDetachedHead && isHostedOnGitHub
+    )
+
     menuStateBuilder.setEnabled(
       'push',
       !branchIsUnborn && !onDetachedHead && !networkActionInProgress
@@ -320,7 +336,7 @@ function getRepositoryMenuBuilder(state: IAppState): MenuStateBuilder {
 
     menuStateBuilder.disable('view-repository-on-github')
     menuStateBuilder.disable('create-pull-request')
-
+    menuStateBuilder.disable('preview-pull-request')
     if (
       selectedState &&
       selectedState.type === SelectionType.MissingRepository
@@ -359,6 +375,7 @@ function getMenuState(state: IAppState): Map<MenuIDs, IMenuItemState> {
 
   return getAllMenusEnabledBuilder()
     .merge(getRepositoryMenuBuilder(state))
+    .merge(getAppMenuBuilder(state))
     .merge(getInWelcomeFlowBuilder(state.showWelcomeFlow))
     .merge(getNoRepositoriesBuilder(state)).state
 }
@@ -405,6 +422,16 @@ function getNoRepositoriesBuilder(state: IAppState): MenuStateBuilder {
       menuStateBuilder.disable(id)
     }
   }
+
+  return menuStateBuilder
+}
+
+function getAppMenuBuilder(state: IAppState): MenuStateBuilder {
+  const menuStateBuilder = new MenuStateBuilder()
+  const enabled = state.resizablePaneActive
+
+  menuStateBuilder.setEnabled('increase-active-resizable-width', enabled)
+  menuStateBuilder.setEnabled('decrease-active-resizable-width', enabled)
 
   return menuStateBuilder
 }

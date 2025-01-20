@@ -4,6 +4,9 @@ import { TabBar } from '../tab-bar'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { Commit } from '../../models/commit'
 import { CommitList } from './commit-list'
+import { LinkButton } from '../lib/link-button'
+import { Account } from '../../models/account'
+import { Emoji } from '../../lib/emoji'
 
 export enum UnreachableCommitsTab {
   Unreachable,
@@ -24,15 +27,20 @@ interface IUnreachableCommitsDialogProps {
   readonly selectedTab: UnreachableCommitsTab
 
   /** The emoji lookup to render images inline */
-  readonly emoji: Map<string, string>
+  readonly emoji: Map<string, Emoji>
 
   /** Called to dismiss the  */
   readonly onDismissed: () => void
+
+  readonly accounts: ReadonlyArray<Account>
 }
 
 interface IUnreachableCommitsDialogState {
   /** The currently select tab. */
   readonly selectedTab: UnreachableCommitsTab
+
+  /** The currently selected sha in the list */
+  readonly selectedSHAs: ReadonlyArray<string>
 }
 
 /** The component for for viewing the unreachable commits in the current diff a repository. */
@@ -45,6 +53,7 @@ export class UnreachableCommitsDialog extends React.Component<
 
     this.state = {
       selectedTab: props.selectedTab,
+      selectedSHAs: [],
     }
   }
 
@@ -71,6 +80,13 @@ export class UnreachableCommitsDialog extends React.Component<
     return selectedShas.filter(sha => !shasInDiff.includes(sha))
   }
 
+  private onCommitsSelected = (
+    commits: ReadonlyArray<Commit>,
+    isContiguous: boolean
+  ) => {
+    this.setState({ selectedSHAs: commits.map(c => c.sha) })
+  }
+
   private renderTabs() {
     return (
       <TabBar
@@ -95,9 +111,12 @@ export class UnreachableCommitsDialog extends React.Component<
             isLocalRepository={true}
             commitLookup={commitLookup}
             commitSHAs={this.getShasToDisplay()}
-            selectedSHAs={[]}
+            selectedSHAs={this.state.selectedSHAs}
             localCommitSHAs={[]}
             emoji={emoji}
+            onCommitsSelected={this.onCommitsSelected}
+            accounts={this.props.accounts}
+            isInformationalView={true}
           />
         </div>
       </>
@@ -127,7 +146,10 @@ export class UnreachableCommitsDialog extends React.Component<
         {this.state.selectedTab === UnreachableCommitsTab.Unreachable
           ? 'not'
           : ''}{' '}
-        in the ancestry path of the most recent commit in your selection.
+        in the ancestry path of the most recent commit in your selection.{' '}
+        <LinkButton uri="https://github.com/desktop/desktop/blob/development/docs/learn-more/unreachable-commits.md">
+          Learn more about unreachable commits.
+        </LinkButton>
       </div>
     )
   }
